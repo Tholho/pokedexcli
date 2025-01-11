@@ -552,7 +552,7 @@ func commandCatch(config *config, cache *pokecache.Cache, pokemon string) error 
 	fmt.Println(pokemonCatchDifficulty)
 	pokemonCatched := rand.Intn(100) - pokemonCatchDifficulty
 	fmt.Println(pokemonCatched)
-	if pokemonCatched < 110 {
+	if pokemonCatched < 0 {
 		fmt.Println(pokemon, "was caught!")
 		config.pokedex[pokemon] = jsonData
 	} else {
