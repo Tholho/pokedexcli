@@ -8,12 +8,15 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
+
+	"github.com/tholho/pokedexcli/internal/pokecache"
 )
 
 type cliCommand struct {
 	name        string
 	description string
-	callback    func(*config) error
+	callback    func(*config, *pokecache.Cache) error
 }
 
 type config struct {
@@ -33,13 +36,7 @@ type locationAreaAPIResponse struct {
 
 var cmdRegistry map[string]cliCommand
 
-func cleanInput(text string) []string {
-	result := strings.Fields(text)
-	fmt.Print(result)
-	return result
-}
-
-func commandExit(config *config) error {
+func commandExit(config *config, cache *pokecache.Cache) error {
 	_, err := fmt.Print("Closing the Pokedex... Goodbye!\n")
 	if err != nil {
 		return err
@@ -48,7 +45,7 @@ func commandExit(config *config) error {
 	return nil
 }
 
-func commandHelp(config *config) error {
+func commandHelp(config *config, cache *pokecache.Cache) error {
 	cmdDescriptions := ""
 	for item := range cmdRegistry {
 		cmdDescriptions = cmdDescriptions + "\n" + cmdRegistry[item].name + ": " + cmdRegistry[item].description
@@ -60,38 +57,54 @@ func commandHelp(config *config) error {
 	return nil
 }
 
-func commandMap(config *config) error {
+func commandMap(config *config, cache *pokecache.Cache) error {
 	var jsonData locationAreaAPIResponse
 	//fmt.Print(config.previous)
+	var data []byte
 	if config.previous == "" {
 		//	fmt.Print("EMPTY PREVIOUS LOL")
-		res, err := http.Get("https://pokeapi.co/api/v2/location-area/")
+		if cacheData, ok := cache.Get("https://pokeapi.co/api/v2/location-area/"); ok {
+			//fmt.Println("using cache")
+			data = cacheData
+		} else {
+			res, err := http.Get("https://pokeapi.co/api/v2/location-area/")
+			//fmt.Println("fetching data")
+			if err != nil {
+				return err
+			}
+			data, err = io.ReadAll(res.Body)
+			if err != nil {
+				return err
+			}
+			cache.Add("https://pokeapi.co/api/v2/location-area/", data)
+		}
+		err := json.Unmarshal(data, &jsonData)
 		if err != nil {
 			return err
 		}
-		data, err := io.ReadAll(res.Body)
-		if err != nil {
-			return err
-		}
-		err = json.Unmarshal(data, &jsonData)
-		if err != nil {
-			return err
-		}
+
 		config.previous = "https://pokeapi.co/api/v2/location-area/"
 		config.next = jsonData.Next
 	} else {
 		if config.next == "" {
 			return fmt.Errorf("either there are no locations left, or an error occured")
 		}
-		res, err := http.Get(config.next)
-		if err != nil {
-			return err
+		if cacheData, ok := cache.Get(config.next); ok {
+			//fmt.Println("using cache")
+			data = cacheData
+		} else {
+			res, err := http.Get(config.next)
+			//fmt.Println("fetching data")
+			if err != nil {
+				return err
+			}
+			data, err = io.ReadAll(res.Body)
+			if err != nil {
+				return err
+			}
+			cache.Add(config.next, data)
 		}
-		data, err := io.ReadAll(res.Body)
-		if err != nil {
-			return err
-		}
-		err = json.Unmarshal(data, &jsonData)
+		err := json.Unmarshal(data, &jsonData)
 		if err != nil {
 			return err
 		}
@@ -113,22 +126,30 @@ func commandMap(config *config) error {
 	return nil
 }
 
-func commandMapb(config *config) error {
+func commandMapb(config *config, cache *pokecache.Cache) error {
 	var jsonData locationAreaAPIResponse
 	//fmt.Print(config.previous)
+	var data []byte
 	if config.previous == "" {
-		fmt.Println("you're on the first page")
+		//fmt.Println("you're on the first page")
 		return nil
 	} else {
-		res, err := http.Get(config.previous)
-		if err != nil {
-			return err
+		if cacheData, ok := cache.Get(config.previous); ok {
+			//fmt.Println("using cache")
+			data = cacheData
+		} else {
+			//fmt.Println("fetching data")
+			res, err := http.Get(config.previous)
+			if err != nil {
+				return err
+			}
+			data, err = io.ReadAll(res.Body)
+			if err != nil {
+				return err
+			}
+			cache.Add(config.previous, data)
 		}
-		data, err := io.ReadAll(res.Body)
-		if err != nil {
-			return err
-		}
-		err = json.Unmarshal(data, &jsonData)
+		err := json.Unmarshal(data, &jsonData)
 		if err != nil {
 			return err
 		}
@@ -138,7 +159,6 @@ func commandMapb(config *config) error {
 	}
 	for _, location := range jsonData.Results {
 		fmt.Println(location.Name)
-
 	}
 	fmt.Println(jsonData.Previous)
 	fmt.Println(jsonData.Next)
@@ -147,6 +167,7 @@ func commandMapb(config *config) error {
 
 func main() {
 	var cfgCmd config
+	cache := pokecache.NewCache(10 * time.Second)
 	cmdRegistry = map[string]cliCommand{
 		"help": {
 			name:        "help",
@@ -188,7 +209,7 @@ func main() {
 		for registryItem := range cmdRegistry {
 			if userCommand == registryItem {
 				cmdNotFound = false
-				cmdRegistry[userCommand].callback(&cfgCmd)
+				cmdRegistry[userCommand].callback(&cfgCmd, cache)
 			}
 		}
 		if cmdNotFound {
